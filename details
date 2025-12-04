@@ -1,0 +1,311 @@
+
+vmware如果重启失败，大多是Hpye-v问题。在cmd的管理员模式下，输入bcdedit /set hypervisorlaunchtype off命令，并重启。
+
+swap  2G swap
+boot  512M ext4
+/home 2G  ext4
+/var 2G xfs
+/  xfs
+
+vi /etc/sysconfig/network-scriptes/ifcfg-ens33
+static
+IPADDR=
+PREFIX=24
+GATEWAY=
+DNS1=
+DNS2=
+NETMASK=255.255.255.0
+
+ifup ens33
+systemtl restart NetworkManager
+
+ping  GATEWAY
+ping  www.baidu.com        ip route add default via 192.168.5.1 dev ens33  添加路由
+
+
+CEPH
+hostnamectl set-hostname ceph01
+hostnamectl set-hostname ceph02
+hostnamectl set-hostname ceph03
+
+cat  >>/etc/hosts  <<EOF                                        all
+> 192.168.5.20 ceph01
+> 192.168.5.21 ceph02
+> 192.168.5.22 ceph03
+> EOF
+
+systemctl stop firewalld && systemctl disable firewalld
+setenforce 0
+sed -i 's/SELINUX=.*/SELINUX=disabled/g' /etc/selinux/config
+
+yum install -y chrony git vim
+systemctl enable chronyd --now
+chronyc sources
+
+git clone https://gitee.com/yftyxa/openeuler-cephadm.git                 ceph01
+cp openeuler-cephadm/cephadm /usr/bin && chmod a+x /usr.bin/cephadm
+
+cd /etc/yum.repos.d                       	                      all
+vim ceph.repo 
+[ceph]
+name=ceph x86_64
+baseurl=https://repo.huaweicloud.com/ceph/rpm-pacific/el8/x86_64
+enable=1
+gpgcheck=0
+
+[ceph-naorth]
+name=ceph noarch
+baseurl=https://repo.huaweicloud.com/ceph/rpm-pacific/el8/noarch
+enable=1
+gpgcheck=0
+
+[ceph-source]
+name=ceph SRPMS
+baseurl=https://repo.huaweicloud.com/ceph/rpm-pacific/el8/SRPMS
+enable=1
+gpgcheck=0
+                                                                     all
+wget -O /etc/yum.repos.d/CentOS-Base.repo https://repo.huaweicloud.com/repository/conf/CentOS-8-reg.repo
+
+yum install -y podman-3.3.1-9.module_el8.5.0+988+b1f0b741.x86_64 lvm2
+
+reboot
+
+ceph01
+cephadm bootstrap --mon-ip 192.168.5.20 --allow-fqdn-hostsname --initial-dashboard-user admin --initial-dashboard-password Huawei@123 --dashboard-password-noupdate
+
+https://192.168.5.20:8443
+
+cephadm shell
+
+ceph cephadm get-pub-key > ~/ceph.pub
+ssh-copy-id -f -i ~/ceph.pub root@ceph02
+ssh-copy-id -f -i ~/ceph.pub root@ceph03
+
+ceph orch host add ceph02
+ceph orch host add ceph03
+ceph orch host ls                       这个就是ceph01用户的标签有关
+ceph orch ls                           这个跟placement的标签有关
+
+ceph orch apply mon --unmanaged=true    这是mon的不自动分配
+ceph orch host label add ceph02 _admin    添加_admin标签
+ceph orch apply osd --all-available-devices   这是添加所有可得到的osd存储盘
+ceph orch ps | grep ceph02               查找ceph02的服务
+
+
+
+K8S
+hostnamectl set-hostname k8s-master01
+hostnamectl set-hostname k8s-master02
+hostnamectl set-hostname k8s-master03
+hostnamectl set-hostname k8s-node1
+hostnamectl set-hostname k8s-node2
+hostnamectl set-hostname k8s-node3
+
+cat <<EOF>>/etc/hosts                        all
+> 192.168.5.66 k8s-master01
+> 192.168.5.67 k8s-master02
+> 192.168.5.68 k8s-master03
+> 192.168.5.69 k8s-node1
+> 192.168.5.70 k8s-node2
+> 192.168.5.71 k8s-node3
+> EOF
+
+ssh-keygen                               master01
+ssh-copy-id k8s-master01
+ssh-copy-id k8s-master02
+ssh-copy-id k8s-master03
+ssh-copy-id k8s-node1
+ssh-copy-id k8s-node2
+ssh-copy-id k8s-node3
+
+iptables -F                                  all
+setenforce 0
+sed -i 's/^SELINUX=.*/SELINUX=disabled/g' /etc/selinux/config
+systemctl stop firewalld && systemctl disable firewalld
+swapoff -a
+sed -i 's/.*swap.*/#&/g' /etc/fstab
+
+cat > /etc/sysconfig/modules/ipvs.modules <<END                 all
+#!/bin/bash
+ipvs_modules="ip_vs ip_vs_lc ip_vs_wlc ip_vs_rr ip_vs_wrr ip_vs_lblc ip_vs_lblcr ip_vs_dh ip_vs_sh ip_vs_nq
+ip_vs_sed ip_vs_ftp nf_conntrack"
+for kernel_module in ${ipvs_modules}; do
+/sbin/modinfo -F filename ${kernel_module} > /dev/null 2>&1
+HCIE-openEuler 实验手册-云原生高阶实践 第11页
+if [ 0 -eq 0 ]; then
+/sbin/modprobe ${kernel_module}
+fi
+done
+END
+chmod 755 /etc/sysconfig/modules/ipvs.modules
+bash /etc/sysconfig/modules/ipvs.modules
+
+
+yum install -y chrony vim
+systemctl enable chronyd --now
+chronyc sources
+
+vim /etc/yum.repos.d/kubernetes.repo
+[kubernetes]                             这个显示的是找不到，猜测是换网址未修改
+name=Kubernetes
+baseurl=https://repo.huaweicloud.com/kubernetes/yum/repos/kubernetes-el7-x86_64
+enabled=1
+gpgcheck=1
+repo_gpgcheck=0
+gpgkey=https://repo.huaweicloud.com/kubernetes/yum/doc/yum-key.gpg
+https://repo.huaweicloud.com/kubernetes/yum/doc/rpm-package-key.gpg
+
+
+[kubernetes]
+name=Kubernetes
+baseurl=https://repo.huaweicloud.com/kubernetes/yum/repos/kubernetes-el7-$basearch/
+enabled=1
+gpgcheck=0
+gpgkey=https://repo.huaweicloud.com/kubernetes/yum/doc/yum-key.gpg
+
+
+yum install -y docker
+systemctl enable docker && systemctl start docker
+
+cat <<EOF  >/etc/docker/daemon.json
+{
+  "exec-opts":["native.cgroupdriver=systemd"]
+}
+EOF
+
+systemctl daemon-reload
+systemctl restart docker
+systemctl status docker
+
+yum install -y nginx keepalived nginx-all-modules             master
+
+vim /etc/nginx/nginx.conf
+添加
+stream {
+log_format main '$remote_addr $upstream_addr - [$time_local] $status
+$upstream_bytes_sent';
+access_log /var/log/nginx/k8s-access.log main;
+upstream k8s-apiserver {
+server 192.168.1.11:6443;
+server 192.168.1.12:6443;
+server 192.168.1.13:6443;
+}
+server {
+listen 16443;
+proxy_pass k8s-apiserver;
+}
+}
+
+
+vim /etc/keepalived/keepalived.conf          master01  02,03修改state为BACKUP，02priority 150,03priority 100
+! Configuration File for keepalived
+
+global_defs {
+router_id master1
+}
+
+vrrp_instance Nginx {
+state MASTER
+interface ens3
+virtual_router_id 51
+priority 200
+advert_int 1
+authentication {
+auth_type PASS
+auth_pass Huawei@1
+}
+virtual_ipaddress {
+192.168.5.66/24
+}
+}
+
+
+systemctl enable nginx --now
+systemctl enable keepalived --now
+systemctl status keepalived
+systemctl status nginx
+
+ping 192.168.5.65   所有master节点能ping通虚拟地址
+
+mkdir /root/deploy                        k8s-master01
+
+yum install -y kubelet kubeadm kubectl                    all
+systemctl enable --now kubelet
+vim /etc/sysctl.conf
+修改ip_forward=1  
+sysctl -p
+
+                           
+vim kubeadm-init.yaml
+apiVersion: kubeadm.k8s.io/v1beta2
+kind: ClusterConfiguration
+kubernetesVersion: v1.23.1
+imageRepository: swr.cn-east-3.myhuaweicloud.com/hcie_openeuler
+controlPlaneEndpoint: 192.168.5.65:6443
+dns:
+  type: CoreDNS
+apiServer:
+  certSANs:
+  - 192.168.5.65
+networking:
+  podSubnet: 10.0.0.0/8
+  serviceSubnet: 172.16.0.0/16
+---
+apiVersion: kubeproxy.config.k8s.io/v1alpha1
+kind: KubeProxyConfiguration
+mode: ipvs
+
+kubeadm config images pull --config kubeadm-init.yaml         all
+kubeadm init --config kubeadm-init.yaml                   k8s-master01
+
+
+
+根据生成的命令，是否有--controlplane判断控制节点
+
+mkdir -p $HOME/.kube
+sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+mkdir -p /etc/kubernetes/pki                          master02,03
+mkdir -p /etc/kubernetes/etcd
+
+
+# 复制证书/配置到k8s-master02
+scp /etc/kubernetes/pki/ca.crt k8s-master02:/etc/kubernetes/pki/
+scp /etc/kubernetes/pki/ca.key k8s-master02:/etc/kubernetes/pki/
+scp /etc/kubernetes/pki/sa.key k8s-master02:/etc/kubernetes/pki/
+scp /etc/kubernetes/pki/sa.pub k8s-master02:/etc/kubernetes/pki/
+scp /etc/kubernetes/pki/front-proxy-ca.crt k8s-master02:/etc/kubernetes/pki/
+scp /etc/kubernetes/pki/front-proxy-ca.key k8s-master02:/etc/kubernetes/pki/
+scp /etc/kubernetes/pki/etcd/ca.crt k8s-master02:/etc/kubernetes/pki/etcd/
+scp /etc/kubernetes/pki/etcd/ca.key k8s-master02:/etc/kubernetes/pki/etcd/
+scp /etc/kubernetes/admin.conf k8s-master02:/etc/kubernetes/
+
+# 复制证书/配置到k8s-master03
+scp /etc/kubernetes/pki/ca.crt k8s-master03:/etc/kubernetes/pki/
+scp /etc/kubernetes/pki/ca.key k8s-master03:/etc/kubernetes/pki/
+scp /etc/kubernetes/pki/sa.key k8s-master03:/etc/kubernetes/pki/
+scp /etc/kubernetes/pki/sa.pub k8s-master03:/etc/kubernetes/pki/
+scp /etc/kubernetes/pki/front-proxy-ca.crt k8s-master03:/etc/kubernetes/pki/
+scp /etc/kubernetes/pki/front-proxy-ca.key k8s-master03:/etc/kubernetes/pki/
+scp /etc/kubernetes/pki/etcd/ca.crt k8s-master03:/etc/kubernetes/pki/etcd/
+scp /etc/kubernetes/pki/etcd/ca.key k8s-master03:/etc/kubernetes/pki/etcd/
+scp /etc/kubernetes/admin.conf k8s-master03:/etc/kubernetes/
+
+
+这是控制节点的加入
+kubeadm join 192.168.5.65:6443 --token ec2fxp.0np9zmlknhtmri1o \
+        --discovery-token-ca-cert-hash sha256:000c0dcfa3fe7a96b9150bbf5863079707cdfb594d53555f0c62517cf0a1b601 \
+        --control-plane
+
+这是普通节点的加入
+kubeadm join 192.168.5.65:6443 --token ec2fxp.0np9zmlknhtmri1o \
+        --discovery-token-ca-cert-hash sha256:000c0dcfa3fe7a96b9150bbf5863079707cdfb594d53555f0c62517cf0a1b601
+
+
+curl -O https://docs.projectcalico.org/archive/v3.23/manifests/calico.yaml
+kubectl apply -f calico.yaml
+
+
+
