@@ -1,1 +1,2 @@
-# -
+ceph的部署
+kubernetes的部署
